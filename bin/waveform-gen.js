@@ -2,66 +2,94 @@
 
 /**
  * waveform-gen CLI
- * Generate waveform peak data from audio files
+ * Generate waveform config JSON files for WaveformPlayer
  *
  * Usage:
- *   waveform-gen <files...> [options]
- *   waveform-gen ./audio/*.mp3
- *   waveform-gen song.mp3 --samples 300 --output ./waveforms/
- *   waveform-gen ./audio/*.mp3 --format inline --precision 3
+ *   waveform-gen ./audio/*.mp3 --output ./waveforms/
+ *   waveform-gen ./audio/*.mp3 --output ./waveforms/ --bpm --id3 --artwork ./covers/
+ *   waveform-gen song.mp3 --format inline
  */
 
 import {generatePeaks} from '../lib/generate.js';
-import {writeFile, mkdir, readdir, stat} from 'node:fs/promises';
-import {resolve, basename, extname, join, dirname} from 'node:path';
+import {writeFile, mkdir, readFile, readdir, stat} from 'node:fs/promises';
+import {resolve, basename, extname, join, dirname, relative} from 'node:path';
 import {existsSync} from 'node:fs';
-import {glob} from 'node:fs';
 
-// Parse args
 const args = process.argv.slice(2);
 
 if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
     console.log(`
-  waveform-gen — Generate waveform peak data from audio files
+  waveform-gen — Generate waveform config JSON for WaveformPlayer
 
   Usage:
     waveform-gen <files|directories...> [options]
 
   Examples:
-    waveform-gen song.mp3
-    waveform-gen ./audio/*.mp3
-    waveform-gen ./audio/ --recursive
     waveform-gen ./audio/*.mp3 --output ./waveforms/
-    waveform-gen ./audio/*.mp3 --format inline
-    waveform-gen ./audio/*.mp3 --samples 300 --precision 3
+    waveform-gen ./audio/*.mp3 --output ./waveforms/ --bpm
+    waveform-gen ./audio/*.mp3 --output ./waveforms/ --bpm --id3 --artwork ./covers/
+    waveform-gen song.mp3 --meta key=Am --meta genre=house
+    waveform-gen song.mp3 --format inline
 
   Options:
     --samples <n>      Number of peaks (default: 200)
     --precision <n>    Decimal places (default: 2)
     --output <dir>     Output directory (default: same as input)
-    --format <type>    Output format: json (default), inline, csv, html
+    --format <type>    json (default) or inline (stdout)
+    --bpm              Detect BPM and include in meta
+    --id3              Read title/artist/album from ID3 tags
+    --artwork <dir>    Look for matching artwork by filename
+    --meta <key=val>   Add custom meta fields (repeatable)
     --recursive        Scan directories recursively
     --quiet            Suppress progress output
     --help, -h         Show this help
 
-  Output Formats:
-    json      One .json file per audio file with { peaks: [...] }
-    inline    Print JSON array to stdout (for piping/scripting)
-    csv       One .csv file per audio file
-    html      Single HTML file with ready-to-paste player markup
+  JSON Output:
+    {
+      "title": "Track Title",
+      "subtitle": "Artist Name",
+      "samples": 200,
+      "peaks": [0.2, 0.37, ...],
+      "markers": [{"time": 30, "label": "Chorus"}],
+      "meta": {"bpm": "128", "key": "Am"}
+    }
+
+  Markers:
+    Auto-detected from sidecar files. For song.mp3, place song.markers.txt
+    in the same directory:
+
+      0:00 Intro
+      0:30 Verse 1
+      1:15 Chorus
+      1:02:30 Bridge
+
+  Artwork:
+    With --artwork ./covers/, matches by audio filename:
+    song.mp3 → covers/song.webp (tries .webp .jpg .jpeg .png .svg .avif)
+
+  ID3 Tags:
+    Requires: npm install music-metadata
+    Reads title, artist, album, and BPM from file metadata.
 
   Supported Audio:
-    mp3, wav, flac, ogg
+    mp3, wav, flac, ogg, m4a, aac
 `);
     process.exit(0);
 }
 
+// ============================================
 // Parse options
+// ============================================
+
 const options = {
     samples: 200,
     precision: 2,
     output: null,
     format: 'json',
+    bpm: false,
+    id3: false,
+    artworkDir: null,
+    meta: {},
     recursive: false,
     quiet: false
 };
@@ -78,6 +106,18 @@ for (let i = 0; i < args.length; i++) {
         options.output = args[++i];
     } else if (arg === '--format' && args[i + 1]) {
         options.format = args[++i];
+    } else if (arg === '--bpm') {
+        options.bpm = true;
+    } else if (arg === '--id3') {
+        options.id3 = true;
+    } else if (arg === '--artwork' && args[i + 1]) {
+        options.artworkDir = args[++i];
+    } else if (arg === '--meta' && args[i + 1]) {
+        const pair = args[++i];
+        const eq = pair.indexOf('=');
+        if (eq > 0) {
+            options.meta[pair.slice(0, eq)] = pair.slice(eq + 1);
+        }
     } else if (arg === '--recursive') {
         options.recursive = true;
     } else if (arg === '--quiet') {
@@ -88,72 +128,122 @@ for (let i = 0; i < args.length; i++) {
 }
 
 const AUDIO_EXTENSIONS = new Set(['.mp3', '.wav', '.flac', '.ogg', '.m4a', '.aac']);
+const IMAGE_EXTENSIONS = ['.webp', '.jpg', '.jpeg', '.png', '.svg', '.avif'];
 
-/**
- * Resolve input paths to actual audio files
- */
+// ============================================
+// File resolution
+// ============================================
+
 async function resolveFiles(paths) {
     const files = [];
-
     for (const p of paths) {
         const resolved = resolve(p);
-
         try {
             const s = await stat(resolved);
-
-            if (s.isFile()) {
-                if (AUDIO_EXTENSIONS.has(extname(resolved).toLowerCase())) {
-                    files.push(resolved);
-                }
+            if (s.isFile() && AUDIO_EXTENSIONS.has(extname(resolved).toLowerCase())) {
+                files.push(resolved);
             } else if (s.isDirectory()) {
-                const entries = await scanDir(resolved, options.recursive);
-                files.push(...entries);
+                files.push(...await scanDir(resolved, options.recursive));
             }
         } catch (e) {
-            // Not a direct file/dir — might be handled by shell glob already
-            if (!options.quiet) {
-                console.warn(`  ⚠ Skipping: ${p} (${e.code || e.message})`);
-            }
+            if (!options.quiet) console.warn(`  ⚠ Skipping: ${p} (${e.code || e.message})`);
         }
     }
-
-    return [...new Set(files)]; // dedupe
+    return [...new Set(files)];
 }
 
-/**
- * Scan directory for audio files
- */
 async function scanDir(dir, recursive) {
     const files = [];
     const entries = await readdir(dir, {withFileTypes: true});
-
     for (const entry of entries) {
         const full = join(dir, entry.name);
         if (entry.isFile() && AUDIO_EXTENSIONS.has(extname(entry.name).toLowerCase())) {
             files.push(full);
         } else if (entry.isDirectory() && recursive) {
-            const sub = await scanDir(full, true);
-            files.push(...sub);
+            files.push(...await scanDir(full, true));
         }
     }
-
     return files;
 }
 
-/**
- * Generate output filename
- */
-function getOutputPath(inputFile, outputDir, format) {
-    const name = basename(inputFile, extname(inputFile));
-    const extMap = {csv: '.csv', html: '.html'};
-    const ext = extMap[format] || '.json';
-    const dir = outputDir || dirname(inputFile);
-    return join(dir, name + ext);
+// ============================================
+// ID3 tags
+// ============================================
+
+async function readID3(filePath) {
+    try {
+        const mm = await import('music-metadata');
+        const metadata = await mm.parseFile(filePath);
+        return {
+            title: metadata.common.title || null,
+            artist: metadata.common.artist || null,
+            album: metadata.common.album || null,
+            bpm: metadata.common.bpm || null
+        };
+    } catch {
+        return {title: null, artist: null, album: null, bpm: null};
+    }
 }
 
-/**
- * Main
- */
+// ============================================
+// Markers from sidecar .markers.txt
+// ============================================
+
+function parseTimestamp(ts) {
+    const parts = ts.split(':').map(Number);
+    if (parts.some(isNaN)) return null;
+    if (parts.length === 1) return parts[0];
+    if (parts.length === 2) return parts[0] * 60 + parts[1];
+    if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+    return null;
+}
+
+async function readMarkers(audioFilePath) {
+    const nameNoExt = basename(audioFilePath, extname(audioFilePath));
+    const markerFile = join(dirname(audioFilePath), nameNoExt + '.markers.txt');
+    if (!existsSync(markerFile)) return [];
+
+    try {
+        const content = await readFile(markerFile, 'utf-8');
+        const markers = [];
+        for (const line of content.split('\n')) {
+            const trimmed = line.trim();
+            if (!trimmed || trimmed.startsWith('#')) continue;
+            const match = trimmed.match(/^(\S+)\s+(.+)$/);
+            if (!match) continue;
+            const time = parseTimestamp(match[1]);
+            if (time === null) continue;
+            markers.push({time, label: match[2].trim()});
+        }
+        return markers;
+    } catch {
+        return [];
+    }
+}
+
+// ============================================
+// Artwork lookup
+// ============================================
+
+function findArtwork(audioFilePath, artworkDir) {
+    if (!artworkDir) return null;
+    const nameNoExt = basename(audioFilePath, extname(audioFilePath));
+    const resolvedDir = resolve(artworkDir);
+
+    for (const ext of IMAGE_EXTENSIONS) {
+        const candidate = join(resolvedDir, nameNoExt + ext);
+        if (existsSync(candidate)) {
+            if (options.output) return relative(resolve(options.output), candidate);
+            return relative(dirname(audioFilePath), candidate);
+        }
+    }
+    return null;
+}
+
+// ============================================
+// Main
+// ============================================
+
 async function main() {
     const files = await resolveFiles(inputPaths);
 
@@ -162,62 +252,94 @@ async function main() {
         process.exit(1);
     }
 
-    if (!options.quiet) {
+    if (!options.quiet && options.format !== 'inline') {
+        const features = [];
+        if (options.bpm) features.push('bpm');
+        if (options.id3) features.push('id3');
+        if (options.artworkDir) features.push('artwork');
+        if (Object.keys(options.meta).length) features.push('meta');
+
         console.log(`\n  🎵 waveform-gen — ${files.length} file${files.length > 1 ? 's' : ''}`);
-        console.log(`     samples: ${options.samples} | precision: ${options.precision} | format: ${options.format}\n`);
+        console.log(`     samples: ${options.samples} | precision: ${options.precision}`);
+        if (features.length) console.log(`     features: ${features.join(', ')}`);
+        console.log('');
     }
 
-    // Create output directory if needed
     if (options.output) {
         await mkdir(options.output, {recursive: true});
     }
 
     let successCount = 0;
     let errorCount = 0;
-    const htmlSnippets = [];
 
     for (const file of files) {
         const name = basename(file);
         const nameNoExt = basename(file, extname(file));
-        const title = nameNoExt.replace(/[-_]/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+        let title = nameNoExt.replace(/[-_]/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+        let subtitle = '';
+        let album = '';
 
         try {
-            if (!options.quiet && options.format !== 'html') {
+            if (!options.quiet && options.format !== 'inline') {
                 process.stdout.write(`  ⏳ ${name}...`);
             }
 
-            const peaks = await generatePeaks(file, {
+            // Generate peaks + optional BPM
+            const result = await generatePeaks(file, {
                 samples: options.samples,
-                precision: options.precision
+                precision: options.precision,
+                detectBPM: options.bpm
             });
 
             if (options.format === 'inline') {
-                // Print to stdout
-                console.log(JSON.stringify(peaks));
-            } else if (options.format === 'html') {
-                // Collect snippets
-                const peaksStr = JSON.stringify(peaks);
-                htmlSnippets.push({name, title, peaks: peaksStr});
-                if (!options.quiet) {
-                    process.stdout.write(`  ✅ ${name}\n`);
-                }
-            } else {
-                // Write file
-                const outPath = getOutputPath(file, options.output, options.format);
+                console.log(JSON.stringify(result.peaks));
+                successCount++;
+                continue;
+            }
 
-                if (options.format === 'csv') {
-                    await writeFile(outPath, peaks.join(',') + '\n');
-                } else {
-                    await writeFile(outPath, JSON.stringify({
-                        file: name,
-                        samples: options.samples,
-                        peaks
-                    }, null, 2) + '\n');
-                }
+            // ID3 tags
+            let id3bpm = null;
+            if (options.id3) {
+                const tags = await readID3(file);
+                if (tags.title) title = tags.title;
+                if (tags.artist) subtitle = tags.artist;
+                if (tags.album) album = tags.album;
+                if (tags.bpm) id3bpm = tags.bpm;
+            }
 
-                if (!options.quiet) {
-                    process.stdout.write(`\r  ✅ ${name} → ${basename(outPath)}\n`);
-                }
+            // Markers
+            const markers = await readMarkers(file);
+
+            // Artwork
+            const artwork = findArtwork(file, options.artworkDir);
+
+            // Meta
+            const meta = {...options.meta};
+            const bpm = id3bpm || result.bpm;
+            if (bpm) meta.bpm = String(bpm);
+            if (album) meta.album = album;
+
+            // Build config
+            const config = {title, samples: options.samples, peaks: result.peaks};
+            if (subtitle) config.subtitle = subtitle;
+            if (artwork) config.artwork = artwork;
+            if (markers.length) config.markers = markers;
+            if (Object.keys(meta).length) config.meta = meta;
+
+            // Write
+            const outDir = options.output || dirname(file);
+            const outPath = join(outDir, nameNoExt + '.json');
+            await writeFile(outPath, JSON.stringify(config, null, 2) + '\n');
+
+            // Log
+            if (!options.quiet) {
+                const extras = [];
+                if (meta.bpm) extras.push(`${meta.bpm} BPM`);
+                if (markers.length) extras.push(`${markers.length} markers`);
+                if (artwork) extras.push('artwork');
+                if (subtitle) extras.push(subtitle);
+                const suffix = extras.length ? ` (${extras.join(', ')})` : '';
+                process.stdout.write(`\r  ✅ ${name} → ${nameNoExt}.json${suffix}\n`);
             }
 
             successCount++;
@@ -229,35 +351,8 @@ async function main() {
         }
     }
 
-    // Write combined HTML file
-    if (options.format === 'html' && htmlSnippets.length > 0) {
-        const outputDir = options.output || '.';
-        await mkdir(outputDir, {recursive: true});
-        const outPath = join(outputDir, 'waveforms.html');
-
-        let html = `<!-- Generated by waveform-gen | ${htmlSnippets.length} tracks | ${options.samples} samples -->\n\n`;
-
-        // WaveformPlayer snippets
-        html += `<!-- ============================================\n     WaveformPlayer — data-waveform-player\n     ============================================ -->\n\n`;
-        for (const s of htmlSnippets) {
-            html += `<div data-waveform-player\n     data-url="${s.name}"\n     data-title="${s.title}"\n     data-waveform='${s.peaks}'>\n</div>\n\n`;
-        }
-
-        // WaveformBar snippets
-        html += `<!-- ============================================\n     WaveformBar — data-wb-play\n     ============================================ -->\n\n`;
-        for (const s of htmlSnippets) {
-            html += `<div data-wb-play\n     data-url="${s.name}"\n     data-title="${s.title}"\n     data-wb-waveform='${s.peaks}'>\n</div>\n\n`;
-        }
-
-        await writeFile(outPath, html);
-
-        if (!options.quiet) {
-            console.log(`\n  📄 ${basename(outPath)} — ${htmlSnippets.length} players\n`);
-        }
-    }
-
     if (!options.quiet && options.format !== 'inline') {
-        console.log(`  Done: ${successCount} generated, ${errorCount} failed\n`);
+        console.log(`\n  Done: ${successCount} generated, ${errorCount} failed\n`);
     }
 }
 

@@ -44,6 +44,7 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
-    "audio-decode": "^2.2.2"
+    "audio-decode": "^2.2.2",
+    "music-metadata": "^11.12.3"
   }
 }
