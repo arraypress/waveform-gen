@@ -1,4 +1,4 @@
-# waveform-gen
+# Waveform Generator
 
 Generate waveform peak data from audio files. A CLI tool and Node.js library for pre-computing waveform data
 for [WaveformPlayer](https://github.com/arraypress/waveform-player)
