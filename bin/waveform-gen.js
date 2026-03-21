@@ -29,6 +29,7 @@ if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
     waveform-gen ./audio/*.mp3 --output ./waveforms/ --bpm
     waveform-gen ./audio/*.mp3 --output ./waveforms/ --bpm --id3 --artwork ./covers/
     waveform-gen song.mp3 --meta key=Am --meta genre=house
+    waveform-gen ./audio/*.mp3 --output ./waveforms/ --base-url assets/audio/
     waveform-gen song.mp3 --format inline
 
   Options:
@@ -39,6 +40,7 @@ if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
     --bpm              Detect BPM and include in meta
     --id3              Read title/artist/album from ID3 tags
     --artwork <dir>    Look for matching artwork by filename
+    --base-url <path>  Prefix for audio URLs in JSON (e.g. assets/audio/)
     --meta <key=val>   Add custom meta fields (repeatable)
     --recursive        Scan directories recursively
     --quiet            Suppress progress output
@@ -89,6 +91,7 @@ const options = {
     bpm: false,
     id3: false,
     artworkDir: null,
+    baseUrl: null,
     meta: {},
     recursive: false,
     quiet: false
@@ -112,6 +115,8 @@ for (let i = 0; i < args.length; i++) {
         options.id3 = true;
     } else if (arg === '--artwork' && args[i + 1]) {
         options.artworkDir = args[++i];
+    } else if (arg === '--base-url' && args[i + 1]) {
+        options.baseUrl = args[++i];
     } else if (arg === '--meta' && args[i + 1]) {
         const pair = args[++i];
         const eq = pair.indexOf('=');
@@ -320,7 +325,10 @@ async function main() {
             if (album) meta.album = album;
 
             // Build config
-            const config = {title, samples: options.samples, peaks: result.peaks};
+            const url = options.baseUrl
+                ? options.baseUrl.replace(/\/?$/, '/') + name
+                : name;
+            const config = {url, title, samples: options.samples, peaks: result.peaks};
             if (subtitle) config.subtitle = subtitle;
             if (artwork) config.artwork = artwork;
             if (markers.length) config.markers = markers;
