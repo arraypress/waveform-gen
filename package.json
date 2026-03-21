@@ -1,0 +1,49 @@
+{
+  "name": "@arraypress/waveform-gen",
+  "version": "1.0.0",
+  "description": "Generate waveform peak data from audio files. CLI and library for pre-computing waveform data for WaveformPlayer.",
+  "type": "module",
+  "main": "./lib/index.js",
+  "exports": {
+    ".": "./lib/index.js"
+  },
+  "bin": {
+    "waveform-gen": "./bin/waveform-gen.js"
+  },
+  "files": [
+    "lib/",
+    "bin/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node bin/waveform-gen.js --help"
+  },
+  "keywords": [
+    "waveform",
+    "audio",
+    "peaks",
+    "waveform-player",
+    "mp3",
+    "wav",
+    "visualization",
+    "cli",
+    "generator"
+  ],
+  "author": "ArrayPress",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/arraypress/waveform-gen.git"
+  },
+  "homepage": "https://github.com/arraypress/waveform-gen",
+  "bugs": {
+    "url": "https://github.com/arraypress/waveform-gen/issues"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "audio-decode": "^2.2.2"
+  }
+}
