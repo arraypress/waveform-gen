@@ -2,58 +2,46 @@
 
 /**
  * waveform-gen CLI
- * Generate waveform config JSON files for WaveformPlayer
+ * Generate waveform peak data from audio files
  *
  * Usage:
  *   waveform-gen ./audio/*.mp3 --output ./waveforms/
- *   waveform-gen ./audio/*.mp3 --output ./waveforms/ --bpm --id3 --artwork ./covers/
  *   waveform-gen song.mp3 --format inline
  */
 
 import {generatePeaks} from '../lib/generate.js';
 import {writeFile, mkdir, readFile, readdir, stat} from 'node:fs/promises';
-import {resolve, basename, extname, join, dirname, relative} from 'node:path';
+import {resolve, basename, extname, join, dirname} from 'node:path';
 import {existsSync} from 'node:fs';
 
 const args = process.argv.slice(2);
 
 if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
     console.log(`
-  waveform-gen — Generate waveform config JSON for WaveformPlayer
+  waveform-gen — Generate waveform peak data for WaveformPlayer
 
   Usage:
     waveform-gen <files|directories...> [options]
 
   Examples:
     waveform-gen ./audio/*.mp3 --output ./waveforms/
-    waveform-gen ./audio/*.mp3 --output ./waveforms/ --bpm
-    waveform-gen ./audio/*.mp3 --output ./waveforms/ --bpm --id3 --artwork ./covers/
-    waveform-gen song.mp3 --meta key=Am --meta genre=house
-    waveform-gen ./audio/*.mp3 --output ./waveforms/ --base-url assets/audio/
+    waveform-gen ./audio/ --recursive --output ./waveforms/
+    waveform-gen song.mp3 --samples 400
     waveform-gen song.mp3 --format inline
 
   Options:
-    --samples <n>      Number of peaks (default: 200)
+    --samples <n>      Number of peaks (default: 1800)
     --precision <n>    Decimal places (default: 2)
     --output <dir>     Output directory (default: same as input)
     --format <type>    json (default) or inline (stdout)
-    --bpm              Detect BPM and include in meta
-    --id3              Read title/artist/album from ID3 tags
-    --artwork <dir>    Look for matching artwork by filename
-    --base-url <path>  Prefix for audio URLs in JSON (e.g. assets/audio/)
-    --meta <key=val>   Add custom meta fields (repeatable)
     --recursive        Scan directories recursively
     --quiet            Suppress progress output
     --help, -h         Show this help
 
   JSON Output:
     {
-      "title": "Track Title",
-      "subtitle": "Artist Name",
-      "samples": 200,
       "peaks": [0.2, 0.37, ...],
-      "markers": [{"time": 30, "label": "Chorus"}],
-      "meta": {"bpm": "128", "key": "Am"}
+      "markers": [{"time": 30, "label": "Chorus"}]
     }
 
   Markers:
@@ -64,14 +52,6 @@ if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
       0:30 Verse 1
       1:15 Chorus
       1:02:30 Bridge
-
-  Artwork:
-    With --artwork ./covers/, matches by audio filename:
-    song.mp3 → covers/song.webp (tries .webp .jpg .jpeg .png .svg .avif)
-
-  ID3 Tags:
-    Requires: npm install music-metadata
-    Reads title, artist, album, and BPM from file metadata.
 
   Supported Audio:
     mp3, wav, flac, ogg, m4a, aac
@@ -84,15 +64,10 @@ if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
 // ============================================
 
 const options = {
-    samples: 200,
+    samples: 1800,
     precision: 2,
     output: null,
     format: 'json',
-    bpm: false,
-    id3: false,
-    artworkDir: null,
-    baseUrl: null,
-    meta: {},
     recursive: false,
     quiet: false
 };
@@ -109,20 +84,6 @@ for (let i = 0; i < args.length; i++) {
         options.output = args[++i];
     } else if (arg === '--format' && args[i + 1]) {
         options.format = args[++i];
-    } else if (arg === '--bpm') {
-        options.bpm = true;
-    } else if (arg === '--id3') {
-        options.id3 = true;
-    } else if (arg === '--artwork' && args[i + 1]) {
-        options.artworkDir = args[++i];
-    } else if (arg === '--base-url' && args[i + 1]) {
-        options.baseUrl = args[++i];
-    } else if (arg === '--meta' && args[i + 1]) {
-        const pair = args[++i];
-        const eq = pair.indexOf('=');
-        if (eq > 0) {
-            options.meta[pair.slice(0, eq)] = pair.slice(eq + 1);
-        }
     } else if (arg === '--recursive') {
         options.recursive = true;
     } else if (arg === '--quiet') {
@@ -133,7 +94,6 @@ for (let i = 0; i < args.length; i++) {
 }
 
 const AUDIO_EXTENSIONS = new Set(['.mp3', '.wav', '.flac', '.ogg', '.m4a', '.aac']);
-const IMAGE_EXTENSIONS = ['.webp', '.jpg', '.jpeg', '.png', '.svg', '.avif'];
 
 // ============================================
 // File resolution
@@ -169,25 +129,6 @@ async function scanDir(dir, recursive) {
         }
     }
     return files;
-}
-
-// ============================================
-// ID3 tags
-// ============================================
-
-async function readID3(filePath) {
-    try {
-        const mm = await import('music-metadata');
-        const metadata = await mm.parseFile(filePath);
-        return {
-            title: metadata.common.title || null,
-            artist: metadata.common.artist || null,
-            album: metadata.common.album || null,
-            bpm: metadata.common.bpm || null
-        };
-    } catch {
-        return {title: null, artist: null, album: null, bpm: null};
-    }
 }
 
 // ============================================
@@ -227,25 +168,6 @@ async function readMarkers(audioFilePath) {
 }
 
 // ============================================
-// Artwork lookup
-// ============================================
-
-function findArtwork(audioFilePath, artworkDir) {
-    if (!artworkDir) return null;
-    const nameNoExt = basename(audioFilePath, extname(audioFilePath));
-    const resolvedDir = resolve(artworkDir);
-
-    for (const ext of IMAGE_EXTENSIONS) {
-        const candidate = join(resolvedDir, nameNoExt + ext);
-        if (existsSync(candidate)) {
-            if (options.output) return relative(resolve(options.output), candidate);
-            return relative(dirname(audioFilePath), candidate);
-        }
-    }
-    return null;
-}
-
-// ============================================
 // Main
 // ============================================
 
@@ -258,16 +180,8 @@ async function main() {
     }
 
     if (!options.quiet && options.format !== 'inline') {
-        const features = [];
-        if (options.bpm) features.push('bpm');
-        if (options.id3) features.push('id3');
-        if (options.artworkDir) features.push('artwork');
-        if (Object.keys(options.meta).length) features.push('meta');
-
         console.log(`\n  🎵 waveform-gen — ${files.length} file${files.length > 1 ? 's' : ''}`);
-        console.log(`     samples: ${options.samples} | precision: ${options.precision}`);
-        if (features.length) console.log(`     features: ${features.join(', ')}`);
-        console.log('');
+        console.log(`     samples: ${options.samples} | precision: ${options.precision}\n`);
     }
 
     if (options.output) {
@@ -280,20 +194,16 @@ async function main() {
     for (const file of files) {
         const name = basename(file);
         const nameNoExt = basename(file, extname(file));
-        let title = nameNoExt.replace(/[-_]/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-        let subtitle = '';
-        let album = '';
 
         try {
             if (!options.quiet && options.format !== 'inline') {
                 process.stdout.write(`  ⏳ ${name}...`);
             }
 
-            // Generate peaks + optional BPM
+            // Generate peaks
             const result = await generatePeaks(file, {
                 samples: options.samples,
-                precision: options.precision,
-                detectBPM: options.bpm
+                precision: options.precision
             });
 
             if (options.format === 'inline') {
@@ -302,50 +212,22 @@ async function main() {
                 continue;
             }
 
-            // ID3 tags
-            let id3bpm = null;
-            if (options.id3) {
-                const tags = await readID3(file);
-                if (tags.title) title = tags.title;
-                if (tags.artist) subtitle = tags.artist;
-                if (tags.album) album = tags.album;
-                if (tags.bpm) id3bpm = tags.bpm;
-            }
-
             // Markers
             const markers = await readMarkers(file);
 
-            // Artwork
-            const artwork = findArtwork(file, options.artworkDir);
-
-            // Meta
-            const meta = {...options.meta};
-            const bpm = id3bpm || result.bpm;
-            if (bpm) meta.bpm = String(bpm);
-            if (album) meta.album = album;
-
-            // Build config
-            const url = options.baseUrl
-                ? options.baseUrl.replace(/\/?$/, '/') + name
-                : name;
-            const config = {url, title, samples: options.samples, peaks: result.peaks};
-            if (subtitle) config.subtitle = subtitle;
-            if (artwork) config.artwork = artwork;
-            if (markers.length) config.markers = markers;
-            if (Object.keys(meta).length) config.meta = meta;
+            // Build output
+            const output = {peaks: result.peaks};
+            if (markers.length) output.markers = markers;
 
             // Write
             const outDir = options.output || dirname(file);
             const outPath = join(outDir, nameNoExt + '.json');
-            await writeFile(outPath, JSON.stringify(config, null, 2) + '\n');
+            await writeFile(outPath, JSON.stringify(output, null, 2) + '\n');
 
             // Log
             if (!options.quiet) {
                 const extras = [];
-                if (meta.bpm) extras.push(`${meta.bpm} BPM`);
                 if (markers.length) extras.push(`${markers.length} markers`);
-                if (artwork) extras.push('artwork');
-                if (subtitle) extras.push(subtitle);
                 const suffix = extras.length ? ` (${extras.join(', ')})` : '';
                 process.stdout.write(`\r  ✅ ${name} → ${nameNoExt}.json${suffix}\n`);
             }
