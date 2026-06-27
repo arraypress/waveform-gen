@@ -116,7 +116,7 @@ async function resolveFiles(paths) {
                 files.push(...await scanDir(resolved, options.recursive));
             }
         } catch (e) {
-            if (!options.quiet) console.warn(`  ⚠ Skipping: ${p} (${e.code || e.message})`);
+            if (!options.quiet) console.warn(`[WaveformGen] Skipping ${p} (${e.code || e.message})`);
         }
     }
     return [...new Set(files)];
@@ -180,7 +180,7 @@ async function main() {
     const files = await resolveFiles(inputPaths);
 
     if (files.length === 0) {
-        console.error('No audio files found.');
+        console.error('[WaveformGen] No audio files found.');
         process.exit(1);
     }
 
@@ -244,7 +244,7 @@ async function main() {
         } catch (err) {
             errorCount++;
             if (!options.quiet) {
-                process.stdout.write(`\r  ❌ ${name}: ${err.message}\n`);
+                process.stderr.write(`\r  ❌ ${name}: ${err.message}\n`);
             }
         }
     }
@@ -255,6 +255,6 @@ async function main() {
 }
 
 main().catch(err => {
-    console.error('Fatal error:', err.message);
+    console.error('[WaveformGen] Fatal error:', err.message);
     process.exit(1);
 });
