@@ -42,6 +42,7 @@ waveform-gen song.mp3 --format inline
 | `--precision <n>` | `2`           | Decimal places for rounding  |
 | `--output <dir>`  | Same as input | Output directory             |
 | `--format <type>` | `json`        | `json` or `inline` (stdout)  |
+| `--bpm`           | off           | Detect tempo, write `bpm`    |
 | `--recursive`     | off           | Scan directories recursively |
 | `--quiet`         | off           | Suppress progress output     |
 
@@ -135,7 +136,11 @@ const {peaks} = await generatePeaks('./song.mp3', {
 
 ## Supported Audio
 
-MP3, WAV, FLAC, OGG, M4A, AAC
+MP3, WAV, FLAC, OGG
+
+> **M4A / AAC** are not supported by the bundled decoder. If you pass one,
+> waveform-gen reports a clear error — convert it to a supported format first
+> (e.g. `ffmpeg -i track.m4a track.wav`).
 
 ## Requirements
 

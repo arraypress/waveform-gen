@@ -34,6 +34,7 @@ if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
     --precision <n>    Decimal places (default: 2)
     --output <dir>     Output directory (default: same as input)
     --format <type>    json (default) or inline (stdout)
+    --bpm              Detect tempo and write "bpm" into the JSON
     --recursive        Scan directories recursively
     --quiet            Suppress progress output
     --help, -h         Show this help
@@ -54,7 +55,8 @@ if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
       1:02:30 Bridge
 
   Supported Audio:
-    mp3, wav, flac, ogg, m4a, aac
+    mp3, wav, flac, ogg
+    (m4a/aac need converting first, e.g. ffmpeg -i in.m4a out.wav)
 `);
     process.exit(0);
 }
@@ -68,6 +70,7 @@ const options = {
     precision: 2,
     output: null,
     format: 'json',
+    bpm: false,
     recursive: false,
     quiet: false
 };
@@ -84,6 +87,8 @@ for (let i = 0; i < args.length; i++) {
         options.output = args[++i];
     } else if (arg === '--format' && args[i + 1]) {
         options.format = args[++i];
+    } else if (arg === '--bpm') {
+        options.bpm = true;
     } else if (arg === '--recursive') {
         options.recursive = true;
     } else if (arg === '--quiet') {
@@ -203,7 +208,8 @@ async function main() {
             // Generate peaks
             const result = await generatePeaks(file, {
                 samples: options.samples,
-                precision: options.precision
+                precision: options.precision,
+                detectBPM: options.bpm
             });
 
             if (options.format === 'inline') {
@@ -217,6 +223,7 @@ async function main() {
 
             // Build output
             const output = {peaks: result.peaks};
+            if (result.bpm != null) output.bpm = result.bpm;
             if (markers.length) output.markers = markers;
 
             // Write
@@ -227,6 +234,7 @@ async function main() {
             // Log
             if (!options.quiet) {
                 const extras = [];
+                if (result.bpm != null) extras.push(`${result.bpm} BPM`);
                 if (markers.length) extras.push(`${markers.length} markers`);
                 const suffix = extras.length ? ` (${extras.join(', ')})` : '';
                 process.stdout.write(`\r  ✅ ${name} → ${nameNoExt}.json${suffix}\n`);
