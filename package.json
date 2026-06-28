@@ -17,7 +17,9 @@
     "LICENSE"
   ],
   "scripts": {
-    "test": "node bin/waveform-gen.js --help"
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:cli": "node bin/waveform-gen.js --help"
   },
   "keywords": [
     "waveform",
@@ -44,6 +46,9 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
-    "audio-decode": "^2.2.2"
+    "audio-decode": "^3.11.0"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.9"
   }
 }
