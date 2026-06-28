@@ -8,7 +8,7 @@
     ".": "./lib/index.js"
   },
   "bin": {
-    "waveform-gen": "./bin/waveform-gen.js"
+    "waveform-gen": "bin/waveform-gen.js"
   },
   "files": [
     "lib/",
