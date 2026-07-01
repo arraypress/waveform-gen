@@ -4,6 +4,13 @@ All notable changes to `@arraypress/waveform-gen` are documented here. The
 format is based on [Keep a Changelog](https://keepachangelog.com/) and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.5.1] — 2026-07-01
+
+### Changed
+
+- Harden `normalizePeaks` — replace `Math.max(...peaks)` with a reduce so very
+  large peak arrays can't trip "RangeError: Maximum call stack size exceeded".
+
 ## [1.5.0] — 2026-06-30
 
 ### Changed
