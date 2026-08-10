@@ -4,6 +4,21 @@ All notable changes to `@arraypress/waveform-gen` are documented here. The
 format is based on [Keep a Changelog](https://keepachangelog.com/) and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+## [1.6.0] — 2026-08-11
+
+### Fixed
+
+- **Bad CLI flags are rejected instead of silently producing wrong output.**
+  `--samples abc` became `NaN` and wrote a peaks file with nothing usable in it;
+  `--precision two` was likewise `NaN`, which skipped rounding entirely (the
+  `precision >= 0` test is false for `NaN`). Both now exit with a message naming
+  the flag. Negative `--precision` still means "don't round".
+- **`--format` is validated.** Only `inline` was ever tested for downstream, so
+  an unrecognised format quietly behaved as `json` — writing files for someone
+  who asked for stdout.
+
 ## [1.5.1] — 2026-07-01
 
 ### Changed

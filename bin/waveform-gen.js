@@ -77,16 +77,47 @@ const options = {
 
 const inputPaths = [];
 
+/**
+ * Read an integer flag, exiting with a clear message when it isn't one.
+ *
+ * `parseInt('abc')` is NaN, which silently propagates: a NaN sample count
+ * yields a peaks file with nothing usable in it, and a NaN precision skips
+ * rounding entirely (the `precision >= 0` test is false for NaN). A CLI that
+ * writes quietly wrong output is worse than one that refuses the flag.
+ *
+ * @param {string} flag - Flag name, for the error message.
+ * @param {string} raw - Raw argument value.
+ * @param {number} [min] - Lowest accepted value.
+ * @returns {number} The parsed integer.
+ */
+function intArg(flag, raw, min = -Infinity) {
+    const n = Number(raw);
+    if (!Number.isInteger(n) || n < min) {
+        console.error(`[WaveformGen] ${flag} expects an integer${min > -Infinity ? ` of ${min} or more` : ''}, got: ${raw}`);
+        process.exit(1);
+    }
+    return n;
+}
+
 for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === '--samples' && args[i + 1]) {
-        options.samples = parseInt(args[++i]);
+        options.samples = intArg('--samples', args[++i], 1);
     } else if (arg === '--precision' && args[i + 1]) {
-        options.precision = parseInt(args[++i]);
+        // Negative precision is the documented "don't round" escape hatch, so
+        // only non-integers are rejected here.
+        options.precision = intArg('--precision', args[++i]);
     } else if (arg === '--output' && args[i + 1]) {
         options.output = args[++i];
     } else if (arg === '--format' && args[i + 1]) {
+        // Only 'inline' is ever tested for downstream, so an unrecognised
+        // format used to quietly behave as 'json' — writing files for someone
+        // who asked for stdout, or vice versa.
         options.format = args[++i];
+        if (options.format !== 'json' && options.format !== 'inline') {
+            console.error(`[WaveformGen] --format expects json or inline, got: ${options.format}`);
+            process.exit(1);
+        }
     } else if (arg === '--bpm') {
         options.bpm = true;
     } else if (arg === '--recursive') {
