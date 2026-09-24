@@ -14,6 +14,11 @@ project adheres to [Semantic Versioning](https://semver.org/).
   first. Each file's path relative to the directory it was found in is now
   kept under `--output` (`out/a/intro.json`, `out/b/intro.json`), with folders
   created as needed. File arguments still write straight into `--output`.
+- **The CLI exits 1 when any file fails.** It used to exit 0 regardless, so a
+  corrupt file in a `prebuild` step shipped as a missing JSON without stopping
+  the build. A missing input path now also counts as a failure.
+- **`--quiet` no longer hides errors.** It suppresses progress and the summary
+  only; per-file errors and skipped input paths always go to stderr.
 
 ### Fixed
 

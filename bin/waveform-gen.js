@@ -37,8 +37,12 @@ if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
     --format <type>    json (default) or inline (stdout)
     --bpm              Detect tempo and write "bpm" into the JSON
     --recursive        Scan directories recursively
-    --quiet            Suppress progress output
+    --quiet            Suppress progress output (errors are still shown)
     --help, -h         Show this help
+
+  Exit status:
+    0  every file generated
+    1  a file failed, an input path is missing, or a flag value is invalid
 
   JSON Output:
     {
@@ -159,7 +163,10 @@ async function resolveFiles(paths) {
                 }
             }
         } catch (e) {
-            if (!options.quiet) console.warn(`[WaveformGen] Skipping ${p} (${e.code || e.message})`);
+            // Always shown and fails the run: under --quiet a typo'd path in a
+            // build script would otherwise just produce one fewer JSON file.
+            console.error(`[WaveformGen] Skipping ${p} (${e.code || e.message})`);
+            process.exitCode = 1;
         }
     }
     return [...entries].map(([file, rel]) => ({file, rel}));
@@ -296,16 +303,19 @@ async function main() {
 
             successCount++;
         } catch (err) {
+            // Errors ignore --quiet (which only hides progress): the docs'
+            // own prebuild recipe runs quiet, and a corrupt file must not
+            // ship as a silently missing JSON.
             errorCount++;
-            if (!options.quiet) {
-                process.stderr.write(`\r  ❌ ${name}: ${err.message}\n`);
-            }
+            process.stderr.write(`\r  ❌ ${name}: ${err.message}\n`);
         }
     }
 
     if (!options.quiet && options.format !== 'inline') {
         console.log(`\n  Done: ${successCount} generated, ${errorCount} failed\n`);
     }
+
+    if (errorCount > 0) process.exitCode = 1;
 }
 
 main().catch(err => {

@@ -125,3 +125,40 @@ describe('--output layout', () => {
 			.toEqual(['song.json', 'song.mp3.json']);
 	});
 });
+
+describe('failures', () => {
+	it('exits non-zero when any file fails, so a build step stops', async () => {
+		await wav('in/good.wav');
+		await writeFile(join(dir, 'in/bad.wav'), 'not audio');
+		const { code } = await run(['in', '--samples', '16'], { cwd: dir });
+
+		expect(code).toBe(1);
+		expect(existsSync(join(dir, 'in/good.json'))).toBe(true);
+	});
+
+	it('still reports errors under --quiet, while hiding progress', async () => {
+		await wav('in/good.wav');
+		await writeFile(join(dir, 'in/bad.wav'), 'not audio');
+		const { code, stdout, stderr } = await run(['in', '--quiet', '--samples', '16'], { cwd: dir });
+
+		expect(code).toBe(1);
+		expect(stdout).toBe('');
+		expect(stderr).toContain('bad.wav');
+		expect(stderr).not.toContain('good.wav');
+	});
+
+	it('reports a missing input path under --quiet and fails the run', async () => {
+		await wav('in/good.wav');
+		const { code, stderr } = await run(['in/good.wav', 'in/typo.wav', '--quiet'], { cwd: dir });
+
+		expect(code).toBe(1);
+		expect(stderr).toContain('typo.wav');
+	});
+
+	it('exits 0 when every file succeeds', async () => {
+		await wav('in/good.wav');
+		const { code, stderr } = await run(['in', '--quiet', '--samples', '16'], { cwd: dir });
+		expect(code).toBe(0);
+		expect(stderr).toBe('');
+	});
+});
