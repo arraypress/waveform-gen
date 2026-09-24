@@ -39,10 +39,14 @@ if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
     --recursive        Scan directories recursively
     --quiet            Suppress progress output (errors are still shown)
     --help, -h         Show this help
+    --                 Treat every later argument as a path
+
+  Value flags take --flag value or --flag=value.
 
   Exit status:
     0  every file generated
     1  a file failed, an input path is missing, or a flag value is invalid
+    2  unknown flag, or a flag missing its value
 
   JSON Output:
     {
@@ -104,33 +108,73 @@ function intArg(flag, raw, min = -Infinity) {
     return n;
 }
 
+/**
+ * Exit with a usage error (status 2, distinct from a failed file's 1).
+ *
+ * @param {string} message - What was wrong with the command line.
+ */
+function usageError(message) {
+    console.error(`[WaveformGen] ${message} (see --help)`);
+    process.exit(2);
+}
+
+// Flags that switch something on, mapped to their option key.
+const BOOLEAN_FLAGS = {'--bpm': 'bpm', '--recursive': 'recursive', '--quiet': 'quiet'};
+const VALUE_FLAGS = new Set(['--samples', '--precision', '--output', '--format']);
+
+// Unrecognised flags used to be dropped silently (`--samples=10` ran with the
+// default and overwrote the file) and single-dash ones like `-q` were taken
+// as input paths, so anything that isn't a known flag is now refused.
+let flagsEnded = false;
 for (let i = 0; i < args.length; i++) {
     const arg = args[i];
-    if (arg === '--samples' && args[i + 1]) {
-        options.samples = intArg('--samples', args[++i], 1);
-    } else if (arg === '--precision' && args[i + 1]) {
+    if (flagsEnded || !arg.startsWith('-') || arg === '-') {
+        inputPaths.push(arg);
+        continue;
+    }
+    if (arg === '--') {
+        flagsEnded = true;
+        continue;
+    }
+
+    // Split `--flag=value`.
+    const eq = arg.startsWith('--') ? arg.indexOf('=') : -1;
+    const flag = eq > 0 ? arg.slice(0, eq) : arg;
+    let value = eq > 0 ? arg.slice(eq + 1) : undefined;
+
+    if (flag in BOOLEAN_FLAGS) {
+        if (value !== undefined) usageError(`${flag} does not take a value`);
+        options[BOOLEAN_FLAGS[flag]] = true;
+        continue;
+    }
+    if (!VALUE_FLAGS.has(flag)) usageError(`Unknown flag: ${flag}`);
+
+    if (value === undefined) {
+        // A following `--flag` is a forgotten value, not the value itself.
+        // (Single-dash is let through for negative --precision.)
+        value = args[i + 1];
+        if (value === undefined || value.startsWith('--')) usageError(`${flag} needs a value`);
+        i++;
+    }
+    if (value === '') usageError(`${flag} needs a value`);
+
+    if (flag === '--samples') {
+        options.samples = intArg('--samples', value, 1);
+    } else if (flag === '--precision') {
         // Negative precision is the documented "don't round" escape hatch, so
         // only non-integers are rejected here.
-        options.precision = intArg('--precision', args[++i]);
-    } else if (arg === '--output' && args[i + 1]) {
-        options.output = args[++i];
-    } else if (arg === '--format' && args[i + 1]) {
+        options.precision = intArg('--precision', value);
+    } else if (flag === '--output') {
+        options.output = value;
+    } else if (flag === '--format') {
         // Only 'inline' is ever tested for downstream, so an unrecognised
         // format used to quietly behave as 'json' — writing files for someone
         // who asked for stdout, or vice versa.
-        options.format = args[++i];
+        options.format = value;
         if (options.format !== 'json' && options.format !== 'inline') {
             console.error(`[WaveformGen] --format expects json or inline, got: ${options.format}`);
             process.exit(1);
         }
-    } else if (arg === '--bpm') {
-        options.bpm = true;
-    } else if (arg === '--recursive') {
-        options.recursive = true;
-    } else if (arg === '--quiet') {
-        options.quiet = true;
-    } else if (!arg.startsWith('--')) {
-        inputPaths.push(arg);
     }
 }
 

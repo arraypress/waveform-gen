@@ -162,3 +162,50 @@ describe('failures', () => {
 		expect(stderr).toBe('');
 	});
 });
+
+describe('flag syntax', () => {
+	it('accepts --flag=value', async () => {
+		await wav('in/good.wav');
+		const { code, stdout } = await run(['--samples=16', '--format=inline', 'in/good.wav'], { cwd: dir });
+
+		expect(code).toBe(0);
+		expect(JSON.parse(stdout)).toHaveLength(16);
+		expect(existsSync(join(dir, 'in/good.json'))).toBe(false);
+	});
+
+	it('accepts --output=<dir> and negative --precision=<n>', async () => {
+		await wav('in/good.wav');
+		const { code } = await run(['in/good.wav', '--output=out', '--precision=-1', '--samples', '16'], { cwd: dir });
+		expect(code).toBe(0);
+		expect((await readJson('out/good.json')).peaks).toHaveLength(16);
+	});
+
+	it('rejects an unknown flag with exit 2 instead of treating it as a path', async () => {
+		for (const flag of ['-q', '--sample', '--quiet=yes']) {
+			const { code, stderr } = await run(['song.mp3', flag], { cwd: dir });
+			expect(code, flag).toBe(2);
+			expect(stderr, flag).toMatch(/Unknown flag|does not take a value/);
+		}
+	});
+
+	it('rejects a value flag with no value with exit 2', async () => {
+		for (const args of [['song.mp3', '--output'], ['--output', '--quiet', 'song.mp3'], ['--samples=', 'song.mp3']]) {
+			const { code, stderr } = await run(args, { cwd: dir });
+			expect(code, args.join(' ')).toBe(2);
+			expect(stderr, args.join(' ')).toMatch(/--(output|samples) needs a value/);
+		}
+	});
+
+	it('treats everything after -- as a path', async () => {
+		await wav('-odd.wav');
+		const { code } = await run(['--samples', '16', '--', '-odd.wav'], { cwd: dir });
+		expect(code).toBe(0);
+		expect(existsSync(join(dir, '-odd.json'))).toBe(true);
+	});
+
+	it('still shows help for -h', async () => {
+		const { code, stdout } = await run(['-h']);
+		expect(code).toBe(0);
+		expect(stdout).toContain('Usage:');
+	});
+});

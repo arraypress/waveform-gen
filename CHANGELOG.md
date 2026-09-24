@@ -19,6 +19,16 @@ project adheres to [Semantic Versioning](https://semver.org/).
   the build. A missing input path now also counts as a failure.
 - **`--quiet` no longer hides errors.** It suppresses progress and the summary
   only; per-file errors and skipped input paths always go to stderr.
+- **Unknown flags and missing flag values are rejected (exit 2).** Anything
+  starting with `-` that isn't a known flag used to be ignored or, for
+  single-dash forms like `-q`, taken as an input path; a trailing `--output`
+  with no value was dropped. Use `--` before paths that start with `-`.
+
+### Added
+
+- **`--flag=value` syntax** for `--samples`, `--precision`, `--output` and
+  `--format`. It was previously ignored, so `--samples=10 --format=inline`
+  silently ran with the defaults and overwrote the JSON.
 
 ### Fixed
 
