@@ -23,6 +23,10 @@ project adheres to [Semantic Versioning](https://semver.org/).
   starting with `-` that isn't a known flag used to be ignored or, for
   single-dash forms like `-q`, taken as an input path; a trailing `--output`
   with no value was dropped. Use `--` before paths that start with `-`.
+- **`generatePeaks()` validates `samples`.** It must be a positive integer
+  (numeric strings are accepted, as on the CLI); anything else throws. A
+  negative count used to return `[]` and `100.5` returned 101 peaks. `0` used
+  to fall back to the default and now throws too.
 
 ### Added
 
@@ -37,6 +41,14 @@ project adheres to [Semantic Versioning](https://semver.org/).
   with `--output`) both target `song.json`; the later one now fails with a
   message naming the first instead of replacing it and being reported as
   generated.
+- **Corrupt mp3/wav/flac/ogg files get an accurate error.** They were told
+  "Supported formats are mp3, wav, flac, and ogg … m4a/aac are not supported —
+  convert first", contradicting themselves. The convert hint is now shown only
+  for m4a/aac; a supported format that won't decode is reported as corrupt or
+  unreadable.
+- **A file that decodes to no audio is an error, not empty peaks.** Some junk
+  (an ID3 tag followed by garbage) decoded to zero channels and was written
+  out as `{"peaks": []}`.
 
 ## [1.6.0] — 2026-08-11
 
