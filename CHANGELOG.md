@@ -27,6 +27,12 @@ project adheres to [Semantic Versioning](https://semver.org/).
   (numeric strings are accepted, as on the CLI); anything else throws. A
   negative count used to return `[]` and `100.5` returned 101 peaks. `0` used
   to fall back to the default and now throws too.
+- **`--format inline` with several files prints one JSON object.** Each file
+  used to print its own unlabelled array back to back, with no way to tell
+  which was which. Several files, or any directory input, now print
+  `{"<path>": [peaks], ...}` keyed by path relative to the working directory
+  (failed files are left out). A single file argument still prints a bare
+  array.
 
 ### Added
 

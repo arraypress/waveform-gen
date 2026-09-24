@@ -209,3 +209,42 @@ describe('flag syntax', () => {
 		expect(stdout).toContain('Usage:');
 	});
 });
+
+describe('--format inline', () => {
+	it('prints a bare peaks array for a single file', async () => {
+		await wav('in/a.wav');
+		const { code, stdout } = await run(['in/a.wav', '--format', 'inline', '--samples', '16'], { cwd: dir });
+		expect(code).toBe(0);
+		const out = JSON.parse(stdout);
+		expect(Array.isArray(out)).toBe(true);
+		expect(out).toHaveLength(16);
+	});
+
+	it('prints one object keyed by path for several files, not unlabelled arrays', async () => {
+		await wav('in/a.wav', 0.3);
+		await wav('in/sub/b.wav', 0.9);
+		const { code, stdout } = await run(['in/a.wav', 'in/sub/b.wav', '--format', 'inline', '--samples', '16'], { cwd: dir });
+
+		expect(code).toBe(0);
+		const out = JSON.parse(stdout);
+		expect(Object.keys(out)).toEqual(['in/a.wav', 'in/sub/b.wav']);
+		expect(out['in/a.wav']).toHaveLength(16);
+		expect(out['in/a.wav']).not.toEqual(out['in/sub/b.wav']);
+	});
+
+	it('prints an object for a directory input, even with one file in it', async () => {
+		await wav('in/a.wav');
+		const { stdout } = await run(['in', '--format', 'inline', '--samples', '16'], { cwd: dir });
+		expect(Object.keys(JSON.parse(stdout))).toEqual(['in/a.wav']);
+	});
+
+	it('leaves failed files out of the object and exits 1', async () => {
+		await wav('in/a.wav');
+		await writeFile(join(dir, 'in/bad.wav'), 'not audio');
+		const { code, stdout, stderr } = await run(['in', '--format', 'inline', '--samples', '16'], { cwd: dir });
+
+		expect(code).toBe(1);
+		expect(Object.keys(JSON.parse(stdout))).toEqual(['in/a.wav']);
+		expect(stderr).toContain('bad.wav');
+	});
+});

@@ -11,7 +11,7 @@
 
 import {generatePeaks} from '../lib/generate.js';
 import {writeFile, mkdir, readFile, readdir, stat} from 'node:fs/promises';
-import {resolve, basename, extname, join, dirname, relative} from 'node:path';
+import {resolve, basename, extname, join, dirname, relative, sep} from 'node:path';
 import {existsSync} from 'node:fs';
 
 const args = process.argv.slice(2);
@@ -34,7 +34,9 @@ if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
     --precision <n>    Decimal places (default: 2)
     --output <dir>     Output directory (default: next to each audio file).
                        Subfolders of a directory input are mirrored inside it
-    --format <type>    json (default) or inline (stdout)
+    --format <type>    json (default) or inline (stdout). Inline prints a
+                       peaks array for one file; for several files or a
+                       directory, one object: {"<path>": [peaks], ...}
     --bpm              Detect tempo and write "bpm" into the JSON
     --recursive        Scan directories recursively
     --quiet            Suppress progress output (errors are still shown)
@@ -286,6 +288,13 @@ async function main() {
     let successCount = 0;
     let errorCount = 0;
 
+    // Inline output: one file argument prints its bare peaks array (as it
+    // always has); several files, or a directory, print a single object keyed
+    // by path, since back-to-back unlabelled arrays can't be told apart.
+    const inlineSingle = inputPaths.length === 1 && files.length === 1
+        && files[0].file === resolve(inputPaths[0]);
+    const inlinePeaks = {};
+
     // Output paths claimed so far this run, lower-cased so `Song.json` and
     // `song.json` collide as they would on a case-insensitive filesystem.
     // `song.mp3` + `song.wav` in one folder both want `song.json`; the later
@@ -319,7 +328,11 @@ async function main() {
             });
 
             if (options.format === 'inline') {
-                console.log(JSON.stringify(result.peaks));
+                if (inlineSingle) {
+                    console.log(JSON.stringify(result.peaks));
+                } else {
+                    inlinePeaks[relative(process.cwd(), file).split(sep).join('/')] = result.peaks;
+                }
                 successCount++;
                 continue;
             }
@@ -353,6 +366,10 @@ async function main() {
             errorCount++;
             process.stderr.write(`\r  ❌ ${name}: ${err.message}\n`);
         }
+    }
+
+    if (options.format === 'inline' && !inlineSingle) {
+        console.log(JSON.stringify(inlinePeaks));
     }
 
     if (!options.quiet && options.format !== 'inline') {
