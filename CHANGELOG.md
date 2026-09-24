@@ -6,6 +6,8 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.0.0] — 2026-09-24
+
 ### Changed
 
 - **`--output` mirrors the input's folder structure.** With `--recursive`,
