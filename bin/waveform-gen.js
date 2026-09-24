@@ -50,9 +50,10 @@ if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
     1  a file failed, an input path is missing, or a flag value is invalid
     2  unknown flag, or a flag missing its value
 
-  JSON Output:
+  JSON Output (bpm only with --bpm, markers only with a sidecar):
     {
       "peaks": [0.2, 0.37, ...],
+      "bpm": 120,
       "markers": [{"time": 30, "label": "Chorus"}]
     }
 

@@ -248,3 +248,31 @@ describe('--format inline', () => {
 		expect(stderr).toContain('bad.wav');
 	});
 });
+
+describe('JSON output format', () => {
+	// The player reads exactly { peaks, bpm?, markers? } from these files.
+	it('writes only peaks by default', async () => {
+		await wav('in/a.wav');
+		await run(['in/a.wav', '--samples', '16'], { cwd: dir });
+		expect(Object.keys(await readJson('in/a.json'))).toEqual(['peaks']);
+	});
+
+	it('writes { peaks, bpm, markers } with --bpm and a markers sidecar', async () => {
+		// A click every 0.5 s (120 BPM) at 22.05 kHz, so onset detection has beats to find.
+		const rate = 22050;
+		const data = new Float32Array(rate * 4);
+		for (let t = 0; t < data.length; t += rate / 2) {
+			for (let j = 0; j < 400; j++) data[t + j] = Math.sin(j / 3) * 0.9 * (1 - j / 400);
+		}
+		await writeFile(join(dir, 'beat.wav'), encodeWav(data, rate));
+		await writeFile(join(dir, 'beat.markers.txt'), '# comment\n0:00 Intro\n0:02 Drop\n');
+		const { code } = await run(['beat.wav', '--bpm', '--samples', '16'], { cwd: dir });
+
+		expect(code).toBe(0);
+		const out = await readJson('beat.json');
+		expect(Object.keys(out)).toEqual(['peaks', 'bpm', 'markers']);
+		expect(out.peaks).toHaveLength(16);
+		expect(typeof out.bpm).toBe('number');
+		expect(out.markers).toEqual([{ time: 0, label: 'Intro' }, { time: 2, label: 'Drop' }]);
+	});
+});
