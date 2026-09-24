@@ -6,6 +6,23 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **`--output` mirrors the input's folder structure.** With `--recursive`,
+  every file used to land flat in the output directory, so `a/intro.wav` and
+  `b/intro.wav` both wrote `intro.json` — the second silently replacing the
+  first. Each file's path relative to the directory it was found in is now
+  kept under `--output` (`out/a/intro.json`, `out/b/intro.json`), with folders
+  created as needed. File arguments still write straight into `--output`.
+
+### Fixed
+
+- **Two inputs that map to the same JSON no longer overwrite each other.**
+  `song.mp3` and `song.wav` in one folder (or two same-named file arguments
+  with `--output`) both target `song.json`; the later one now fails with a
+  message naming the first instead of replacing it and being reported as
+  generated.
+
 ## [1.6.0] — 2026-08-11
 
 ### Fixed

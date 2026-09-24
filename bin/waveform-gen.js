@@ -11,7 +11,7 @@
 
 import {generatePeaks} from '../lib/generate.js';
 import {writeFile, mkdir, readFile, readdir, stat} from 'node:fs/promises';
-import {resolve, basename, extname, join, dirname} from 'node:path';
+import {resolve, basename, extname, join, dirname, relative} from 'node:path';
 import {existsSync} from 'node:fs';
 
 const args = process.argv.slice(2);
@@ -32,7 +32,8 @@ if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
   Options:
     --samples <n>      Number of peaks (default: 1800)
     --precision <n>    Decimal places (default: 2)
-    --output <dir>     Output directory (default: same as input)
+    --output <dir>     Output directory (default: next to each audio file).
+                       Subfolders of a directory input are mirrored inside it
     --format <type>    json (default) or inline (stdout)
     --bpm              Detect tempo and write "bpm" into the JSON
     --recursive        Scan directories recursively
@@ -135,22 +136,33 @@ const AUDIO_EXTENSIONS = new Set(['.mp3', '.wav', '.flac', '.ogg', '.m4a', '.aac
 // File resolution
 // ============================================
 
+/**
+ * Expand the input paths into audio files, each paired with its path relative
+ * to the input it came from (just the basename for a file argument). That
+ * relative path is what gets mirrored under --output, so `in/a/intro.wav` and
+ * `in/b/intro.wav` land in separate folders instead of on top of each other.
+ *
+ * @param {string[]} paths - File and directory arguments.
+ * @returns {Promise<{file: string, rel: string}[]>} Unique files, first input wins.
+ */
 async function resolveFiles(paths) {
-    const files = [];
+    const entries = new Map();
     for (const p of paths) {
         const resolved = resolve(p);
         try {
             const s = await stat(resolved);
             if (s.isFile() && AUDIO_EXTENSIONS.has(extname(resolved).toLowerCase())) {
-                files.push(resolved);
+                if (!entries.has(resolved)) entries.set(resolved, basename(resolved));
             } else if (s.isDirectory()) {
-                files.push(...await scanDir(resolved, options.recursive));
+                for (const file of await scanDir(resolved, options.recursive)) {
+                    if (!entries.has(file)) entries.set(file, relative(resolved, file));
+                }
             }
         } catch (e) {
             if (!options.quiet) console.warn(`[WaveformGen] Skipping ${p} (${e.code || e.message})`);
         }
     }
-    return [...new Set(files)];
+    return [...entries].map(([file, rel]) => ({file, rel}));
 }
 
 async function scanDir(dir, recursive) {
@@ -220,20 +232,32 @@ async function main() {
         console.log(`     samples: ${options.samples} | precision: ${options.precision}\n`);
     }
 
-    if (options.output) {
-        await mkdir(options.output, {recursive: true});
-    }
-
     let successCount = 0;
     let errorCount = 0;
 
-    for (const file of files) {
-        const name = basename(file);
-        const nameNoExt = basename(file, extname(file));
+    // Output paths claimed so far this run, lower-cased so `Song.json` and
+    // `song.json` collide as they would on a case-insensitive filesystem.
+    // `song.mp3` + `song.wav` in one folder both want `song.json`; the later
+    // one used to overwrite the earlier and still be reported as generated.
+    const claimed = new Map();
+
+    for (const {file, rel: name} of files) {
+        const relJson = join(dirname(name), basename(name, extname(name)) + '.json');
+        const outPath = options.output
+            ? join(options.output, relJson)
+            : join(dirname(file), basename(relJson));
 
         try {
             if (!options.quiet && options.format !== 'inline') {
                 process.stdout.write(`  ⏳ ${name}...`);
+            }
+
+            if (options.format !== 'inline') {
+                const key = resolve(outPath).toLowerCase();
+                if (claimed.has(key)) {
+                    throw new Error(`same output as ${claimed.get(key)} (${relJson}) — not overwriting; rename one of them`);
+                }
+                claimed.set(key, name);
             }
 
             // Generate peaks
@@ -258,8 +282,7 @@ async function main() {
             if (markers.length) output.markers = markers;
 
             // Write
-            const outDir = options.output || dirname(file);
-            const outPath = join(outDir, nameNoExt + '.json');
+            await mkdir(dirname(outPath), {recursive: true});
             await writeFile(outPath, JSON.stringify(output, null, 2) + '\n');
 
             // Log
@@ -268,7 +291,7 @@ async function main() {
                 if (result.bpm != null) extras.push(`${result.bpm} BPM`);
                 if (markers.length) extras.push(`${markers.length} markers`);
                 const suffix = extras.length ? ` (${extras.join(', ')})` : '';
-                process.stdout.write(`\r  ✅ ${name} → ${nameNoExt}.json${suffix}\n`);
+                process.stdout.write(`\r  ✅ ${name} → ${relJson}${suffix}\n`);
             }
 
             successCount++;
