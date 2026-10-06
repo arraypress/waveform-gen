@@ -33,9 +33,15 @@ const BIN = join(HERE, '..', 'bin', 'waveform-gen.js');
 // The core lives in a sibling repo in the family workspace. When it's there,
 // the encoding is checked against the real thing; a standalone clone falls
 // back to the pinned fixture below.
-const CORE_DATA = join(HERE, '..', '..', 'waveform-sounds', 'src', 'js', 'data.js');
-const CORE_DRAW = join(HERE, '..', '..', 'waveform-sounds', 'src', 'js', 'draw.js');
-const hasCore = existsSync(CORE_DATA) && existsSync(CORE_DRAW);
+// The waveform-sounds sibling repo, when it's checked out next to this one.
+// Skipping is only right when the REPO is absent (a standalone clone). If
+// it's present but these files moved, fail: a parity check that quietly
+// skips is no check (it did, for a while, after waveform-sounds split its
+// src/js into folders).
+const CORE_REPO = join(HERE, '..', '..', 'waveform-sounds');
+const CORE_DATA = join(CORE_REPO, 'src', 'js', 'data', 'sounds.js');
+const CORE_DRAW = join(CORE_REPO, 'src', 'js', 'dom', 'draw.js');
+const hasCore = existsSync(CORE_REPO);
 
 describe('parseFilename', () => {
 	const cases = [
@@ -95,6 +101,11 @@ describe('encodePeaks', () => {
 		expect(encodePeaks(input)).toBe('00ff8000011010ff000040ff');
 		expect(encodePeaks([])).toBe('');
 		expect(encodePeaks(null)).toBe('');
+	});
+
+	it.skipIf(!hasCore)('finds waveform-sounds\' peak codec and resampler where it expects them', () => {
+		expect(existsSync(CORE_DATA), CORE_DATA).toBe(true);
+		expect(existsSync(CORE_DRAW), CORE_DRAW).toBe(true);
 	});
 
 	it.skipIf(!hasCore)('is identical to waveform-sounds\' encodePeaks, and round-trips through its decodePeaks', async () => {
