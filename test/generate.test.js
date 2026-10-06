@@ -33,6 +33,12 @@ describe('generatePeaks', () => {
 		expect(bpm).toBeNull();                          // not requested
 	});
 
+	it('reports the decoded duration in seconds', async () => {
+		const file = await writeWav('long.wav', tone(8000, 2.5, 220, 0.5));
+		const { duration } = await generatePeaks(file, { samples: 16 });
+		expect(duration).toBeCloseTo(2.5, 5);
+	});
+
 	it('honours the precision option when rounding peaks', async () => {
 		const file = await writeWav('tone2.wav', tone(8000, 1, 440, 0.4));
 		const { peaks } = await generatePeaks(file, { samples: 32, precision: 1 });

@@ -7,9 +7,11 @@
  * Usage:
  *   waveform-gen ./audio/*.mp3 --output ./waveforms/
  *   waveform-gen song.mp3 --format inline
+ *   waveform-gen ./previews/ --recursive --manifest ./public/sounds.json
  */
 
-import {generatePeaks} from '../lib/generate.js';
+import {generatePeaks, roundPeaks} from '../lib/generate.js';
+import {manifestEntry, createManifest, commonRoot, relativeTo, fileUrl, DEFAULT_MANIFEST_BARS} from '../lib/manifest.js';
 import {writeFile, mkdir, readFile, readdir, stat} from 'node:fs/promises';
 import {resolve, basename, extname, join, dirname, relative, sep} from 'node:path';
 import {existsSync} from 'node:fs';
@@ -28,6 +30,7 @@ if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
     waveform-gen ./audio/ --recursive --output ./waveforms/
     waveform-gen song.mp3 --samples 400
     waveform-gen song.mp3 --format inline
+    waveform-gen ./previews/ --recursive --manifest ./public/sounds.json --base-url /previews/
 
   Options:
     --samples <n>      Number of peaks (default: 1800)
@@ -43,12 +46,26 @@ if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
     --help, -h         Show this help
     --                 Treat every later argument as a path
 
+  Sounds manifest (for @arraypress/waveform-sounds):
+    --manifest <file>  Write one JSON listing every sound: url, title, type,
+                       bpm and key (from the file name), duration and 64-bar
+                       peaks. Without --output no per-file JSON is written
+    --root <dir>       Folder URLs and types are relative to (default: the
+                       deepest folder containing every input)
+    --base-url <url>   Public URL of --root (default: /)
+    --type <name>      Type for every sound (default: the file's folder name;
+                       none for files directly in --root)
+    --manifest-bars <n>       Bars per sound (default: 64)
+    --waveform-base-url <url> Public URL of --output, for each sound's
+                              "waveform" link (default: --base-url)
+
   Value flags take --flag value or --flag=value.
 
   Exit status:
     0  every file generated
     1  a file failed, an input path is missing, or a flag value is invalid
-    2  unknown flag, or a flag missing its value
+    2  unknown flag, a flag missing its value, or --manifest with
+       --format inline
 
   JSON Output (bpm only with --bpm, markers only with a sidecar):
     {
@@ -84,7 +101,13 @@ const options = {
     format: 'json',
     bpm: false,
     recursive: false,
-    quiet: false
+    quiet: false,
+    manifest: null,
+    root: null,
+    baseUrl: '/',
+    manifestBars: DEFAULT_MANIFEST_BARS,
+    type: null,
+    waveformBaseUrl: null
 };
 
 const inputPaths = [];
@@ -123,7 +146,10 @@ function usageError(message) {
 
 // Flags that switch something on, mapped to their option key.
 const BOOLEAN_FLAGS = {'--bpm': 'bpm', '--recursive': 'recursive', '--quiet': 'quiet'};
-const VALUE_FLAGS = new Set(['--samples', '--precision', '--output', '--format']);
+const VALUE_FLAGS = new Set([
+    '--samples', '--precision', '--output', '--format',
+    '--manifest', '--root', '--base-url', '--manifest-bars', '--type', '--waveform-base-url'
+]);
 
 // Unrecognised flags used to be dropped silently (`--samples=10` ran with the
 // default and overwrote the file) and single-dash ones like `-q` were taken
@@ -178,7 +204,25 @@ for (let i = 0; i < args.length; i++) {
             console.error(`[WaveformGen] --format expects json or inline, got: ${options.format}`);
             process.exit(1);
         }
+    } else if (flag === '--manifest') {
+        options.manifest = value;
+    } else if (flag === '--root') {
+        options.root = value;
+    } else if (flag === '--base-url') {
+        options.baseUrl = value;
+    } else if (flag === '--manifest-bars') {
+        options.manifestBars = intArg('--manifest-bars', value, 1);
+    } else if (flag === '--type') {
+        options.type = value;
+    } else if (flag === '--waveform-base-url') {
+        options.waveformBaseUrl = value;
     }
+}
+
+// The manifest is a file; inline output is stdout. Mixing them would leave
+// one of the two requests silently unanswered.
+if (options.manifest && options.format === 'inline') {
+    usageError('--manifest cannot be combined with --format inline');
 }
 
 const AUDIO_EXTENSIONS = new Set(['.mp3', '.wav', '.flac', '.ogg', '.m4a', '.aac']);
@@ -202,6 +246,7 @@ async function resolveFiles(paths) {
         const resolved = resolve(p);
         try {
             const s = await stat(resolved);
+            if (s.isFile() || s.isDirectory()) inputBases.push({path: resolved, isDir: s.isDirectory()});
             if (s.isFile() && AUDIO_EXTENSIONS.has(extname(resolved).toLowerCase())) {
                 if (!entries.has(resolved)) entries.set(resolved, basename(resolved));
             } else if (s.isDirectory()) {
@@ -218,6 +263,14 @@ async function resolveFiles(paths) {
     }
     return [...entries].map(([file, rel]) => ({file, rel}));
 }
+
+/**
+ * Every existing input argument, for the manifest's default root: a
+ * directory counts as itself, a file (e.g. a shell-expanded glob) as its
+ * folder. Filled by resolveFiles().
+ * @type {{path: string, isDir: boolean}[]}
+ */
+const inputBases = [];
 
 async function scanDir(dir, recursive) {
     const files = [];
@@ -302,6 +355,13 @@ async function main() {
     // one used to overwrite the earlier and still be reported as generated.
     const claimed = new Map();
 
+    // Manifest mode: per-file JSON is written only when --output asks for it.
+    const writeJson = options.format !== 'inline' && (!options.manifest || options.output);
+    const manifestRoot = options.manifest
+        ? resolve(options.root ?? commonRoot(inputBases) ?? process.cwd())
+        : null;
+    const manifestItems = [];
+
     for (const {file, rel: name} of files) {
         const relJson = join(dirname(name), basename(name, extname(name)) + '.json');
         const outPath = options.output
@@ -313,7 +373,10 @@ async function main() {
                 process.stdout.write(`  ⏳ ${name}...`);
             }
 
-            if (options.format !== 'inline') {
+            // Before decoding: a file outside --root can't get a URL.
+            const manifestRel = manifestRoot ? relativeTo(manifestRoot, file) : null;
+
+            if (writeJson) {
                 const key = resolve(outPath).toLowerCase();
                 if (claimed.has(key)) {
                     throw new Error(`same output as ${claimed.get(key)} (${relJson}) — not overwriting; rename one of them`);
@@ -321,18 +384,46 @@ async function main() {
                 claimed.set(key, name);
             }
 
-            // Generate peaks
+            // Generate peaks. The manifest downsamples the unrounded peaks
+            // (rounding to 2 places first would shift the 8-bit values), so
+            // rounding for the per-file JSON happens here instead.
             const result = await generatePeaks(file, {
                 samples: options.samples,
-                precision: options.precision,
+                precision: options.manifest ? -1 : options.precision,
                 detectBPM: options.bpm
             });
+            const peaks = options.manifest ? roundPeaks(result.peaks, options.precision) : result.peaks;
+
+            let entry = null;
+            if (manifestRoot) {
+                entry = manifestEntry({rel: manifestRel, ...result}, {
+                    baseUrl: options.baseUrl,
+                    bars: options.manifestBars,
+                    type: options.type,
+                    waveform: options.output
+                        ? fileUrl(relJson, options.waveformBaseUrl ?? options.baseUrl)
+                        : undefined
+                });
+            }
+
+            if (!writeJson && options.format !== 'inline') {
+                if (!options.quiet) {
+                    const extras = [];
+                    if (entry.bpm != null) extras.push(`${entry.bpm} BPM`);
+                    if (entry.key) extras.push(entry.key);
+                    const suffix = extras.length ? ` (${extras.join(', ')})` : '';
+                    process.stdout.write(`\r  ✅ ${name}${suffix}\n`);
+                }
+                manifestItems.push({rel: manifestRel, entry});
+                successCount++;
+                continue;
+            }
 
             if (options.format === 'inline') {
                 if (inlineSingle) {
-                    console.log(JSON.stringify(result.peaks));
+                    console.log(JSON.stringify(peaks));
                 } else {
-                    inlinePeaks[relative(process.cwd(), file).split(sep).join('/')] = result.peaks;
+                    inlinePeaks[relative(process.cwd(), file).split(sep).join('/')] = peaks;
                 }
                 successCount++;
                 continue;
@@ -342,13 +433,15 @@ async function main() {
             const markers = await readMarkers(file);
 
             // Build output
-            const output = {peaks: result.peaks};
+            const output = {peaks};
             if (result.bpm != null) output.bpm = result.bpm;
             if (markers.length) output.markers = markers;
 
             // Write
             await mkdir(dirname(outPath), {recursive: true});
             await writeFile(outPath, JSON.stringify(output, null, 2) + '\n');
+            // Only now: a sound must not link a JSON that failed to write.
+            if (entry) manifestItems.push({rel: manifestRel, entry});
 
             // Log
             if (!options.quiet) {
@@ -371,6 +464,19 @@ async function main() {
 
     if (options.format === 'inline' && !inlineSingle) {
         console.log(JSON.stringify(inlinePeaks));
+    }
+
+    if (options.manifest) {
+        // Written with whatever succeeded; a failure still fails the run.
+        const manifest = createManifest(manifestItems);
+        await mkdir(dirname(resolve(options.manifest)), {recursive: true});
+        await writeFile(options.manifest, JSON.stringify(manifest, null, 2) + '\n');
+        if (!options.quiet) {
+            const {sounds} = manifest;
+            const withBpm = sounds.filter(s => s.bpm != null).length;
+            const withKey = sounds.filter(s => s.key).length;
+            console.log(`\n  📋 ${options.manifest}: ${sounds.length} sound${sounds.length === 1 ? '' : 's'}, ${withBpm} with BPM, ${withKey} with key`);
+        }
     }
 
     if (!options.quiet && options.format !== 'inline') {

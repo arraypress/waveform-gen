@@ -6,6 +6,43 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.1.0] — 2026-10-06
+
+### Added
+
+- **`--manifest <file>`** writes one sounds manifest for
+  `@arraypress/waveform-sounds` — `{"version": 1, "sounds": [...]}` with each
+  file's `url`, `title`, `type`, `bpm`, `key`, `duration` and low-resolution
+  `peaks` — so a list of hundreds of previews loads from one request instead
+  of one JSON per sound. Without `--output` only the manifest is written;
+  with it, the per-file JSON is written too and each sound links to it as
+  `waveform`. Files that fail are left out and still fail the run.
+  - `peaks` is an 8-bit hex string, two characters per bar, encoded exactly
+    as waveform-sounds' `encodePeaks`: 64 bars by default
+    (`--manifest-bars <n>`), downsampled max-per-bucket from the same
+    normalised peaks the per-file JSON holds (loudest bar = `ff`).
+  - `url` is `--base-url` (default `/`) joined with the path relative to
+    `--root` (default: the deepest folder containing every input — a
+    directory argument counts as itself, a file as its folder), each segment
+    URL-encoded.
+  - `type` is the file's folder name (none for files directly in the root);
+    `--type <name>` sets one for every sound.
+  - `bpm` and `key` are read from the file name
+    (`NW_Bass_Loop_04_128_Fmin.wav` → 128, `Fm`, title `NW Bass Loop 04`),
+    erring towards leaving them out: a BPM is a whole word of 50–220, a key
+    is a whole word, and ambiguous spellings (a lone `A`, `Eb`, `Am`) count
+    only beside the BPM. With `--bpm`, a detected tempo fills in when the
+    name has none.
+  - `--waveform-base-url <url>` is the public URL of `--output` for the
+    `waveform` links (default: `--base-url`).
+  - Sounds are sorted by path in natural order (`Loop 2` before `Loop 10`).
+- **Library:** `buildManifest(files, options)`, plus the pieces it is made of
+  — `parseFilename`, `manifestEntry`, `createManifest`, `encodePeaks`,
+  `resamplePeaks`, `fileUrl`, `naturalCompare`, `commonRoot`, `relativeTo` —
+  and `roundPeaks`.
+- **`generatePeaks()` also returns `duration`**, the decoded length in
+  seconds.
+
 ## [2.0.0] — 2026-09-24
 
 ### Changed
