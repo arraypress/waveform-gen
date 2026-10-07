@@ -56,7 +56,10 @@ npx @arraypress/waveform-gen ./public/previews/ --recursive \
 guessed: a BPM is a whole word of 50–220 (`128`, `128bpm`, `128_BPM`), a key a
 whole word (`Fmin`, `F#m`, `Bbmin`, `F_minor`, `A#`); a lone `A` or `Eb` only
 counts right beside the BPM. With `--bpm`, a detected tempo fills in when the
-name has none. In code: `buildManifest(files, options)` and `parseFilename(name)`.
+name has none. A sound is marked `loop: true` when its folder or file name has
+the word "loop" or "loops" in it (`Drum Loops/`, `Bass_Loop_01`, `DrumLoop_120`;
+not `Loopmasters_Kick`); everything else is a one-shot. In code:
+`buildManifest(files, options)`, `parseFilename(name)` and `isLoopPath(rel)`.
 
 ## Documentation
 

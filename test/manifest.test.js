@@ -14,6 +14,7 @@ import {
 	naturalCompare,
 	commonRoot,
 	manifestEntry,
+	isLoopPath,
 	createManifest,
 	buildManifest,
 } from '../lib/index.js';
@@ -173,6 +174,19 @@ describe('commonRoot', () => {
 	});
 });
 
+describe('isLoopPath', () => {
+	it('finds "loop" / "loops" as a word in a folder or the file name', () => {
+		for (const rel of ['Drum Loops/kick.wav', 'loops/a.wav', 'Bass_Loop_01.wav', 'Paris Bass Loop 02.mp3', 'DrumLoop_120.wav', 'Synth/PadLoops/x.wav', 'LOOP-01.wav', 'Loop01.wav']) {
+			expect(isLoopPath(rel), rel).toBe(true);
+		}
+	});
+	it('ignores it inside another word, and never infers one from a tempo', () => {
+		for (const rel of ['Loopmasters_Kick.wav', 'Kick_128.wav', 'Drums/Snare.wav', 'Sloop.wav', 'One-shots/Hat.wav', 'Looper.wav']) {
+			expect(isLoopPath(rel), rel).toBe(false);
+		}
+	});
+});
+
 describe('manifestEntry', () => {
 	const peaks = Array.from({ length: 128 }, (_, i) => (i % 2 ? 1 : 0.5));
 
@@ -184,9 +198,15 @@ describe('manifestEntry', () => {
 			type: 'Bass Loops',
 			bpm: 128,
 			key: 'Fm',
+			loop: true,
 			duration: 8.02,
 			peaks: 'ff'.repeat(64),
 		});
+	});
+
+	it('marks loops by a "loop" word in the path; everything else is left unmarked', () => {
+		expect(manifestEntry({ rel: 'Drums/Kick_01.wav', peaks }).loop).toBeUndefined();
+		expect(manifestEntry({ rel: 'Drum Loops/Groove_01.wav', peaks }).loop).toBe(true);
 	});
 
 	it('takes the type from the nearest folder, none in the root, --type over both', () => {

@@ -6,6 +6,17 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.2.0] — 2026-10-07
+
+### Added
+
+- **`--manifest` marks loops.** A sound gets `loop: true` when its folder or
+  file name has the word "loop" or "loops" in it — `Drum Loops/`,
+  `Bass_Loop_01`, `DrumLoop_120` (camelCase is split first) — and nothing
+  otherwise, which `@arraypress/waveform-sounds` 0.2.0 reads as a one-shot.
+  A whole word only (`Loopmasters_Kick` is not a loop), and never inferred
+  from a tempo. In code: `isLoopPath(rel)`.
+
 ## [2.1.0] — 2026-10-06
 
 ### Added

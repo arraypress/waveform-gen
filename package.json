@@ -1,6 +1,6 @@
 {
   "name": "@arraypress/waveform-gen",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "Generate waveform peak data from audio files. CLI and library for pre-computing waveform data for WaveformPlayer, and sounds manifests for WaveformSounds.",
   "type": "module",
   "main": "./lib/index.js",
